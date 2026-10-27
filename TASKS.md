@@ -50,3 +50,25 @@
       newdef отличается только backward-ref (задокументировано);
       skip отличается только whitespace (задокументировано).
       php -l OK, бенчмарк прогнан. Харнесс: `_bench/diff.php`
+
+## Раунд 4 — тестовый набор (выполнен, 53/53 PASS)
+Формат: самодостаточный `tests/` без внешних зависимостей (legacy single-file
+библиотека; PHPUnit потянул бы composer.json + vendor/). Раннер
+`tests/run.php`, фикстуры `tests/fixtures/*.html`, assert-функции,
+PHP 7.4-8.4 совместимо.
+
+- [x] 39. `tests/run.php` — раннер: `t_ok/t_eqstr/t_has/t_not`, подсчёт,
+      exit code 1 при провале
+- [x] 40. Фикстуры: main/rows/pre/obj/inc+part/nest/bwd/inner+compound/unk/pf/pat
+- [x] 41. Тесты: assign/parse/fetch, define (строка/массив), append `.row`,
+      dynamic block, IFDEF/IFNDEF/ELSE/ENDIF, object-tag (с параметром),
+      include `<!-- #include -->`, forward-ref транзитивность, compound
+- [x] 42. Тесты флагов: `FAST_REPLACE=FALSE` == байтово legacy (5 фикстур);
+      `FAST_BLOCK_SKIP` — pinned legacy whitespace + сохранение индентации;
+      backward-ref дивергенция зафиксирована обеими проверками
+- [x] 43. Граничные: STRICT+STRICT_DEBUG (WARNINGS), pre_filter,
+      ERROR_ECHO TRUE/FALSE, clear/clear_parse/clear_define/clear_dynamic
+      (strip из родителя, не удаление DYNAMIC)/clear_all,
+      FastPrint echo+return, FastWrite, setPattern vars+defines,
+      parse_and_return, missing file → exit (child_missing.php)
+- [x] 44. `tests/README.md` + `php tests\run.php` — **53/53 PASS**
