@@ -1,4 +1,4 @@
-# SPEC: FastTemplate 1.6.2 — совместимость PHP 7.4–8.4
+# SPEC: FastTemplate 1.7.0 — совместимость PHP 7.4–8.4
 
 ## Цель
 Один файл `class.FastTemplate.php`, работающий на PHP 7.4–8.4 без deprecation-ворчаний.
@@ -85,3 +85,50 @@
 - `php -l` на PHP 7.4 (локально доступно)
 - Smoke-тест: define/assign/parse/fetch + dynamic block + IFDEF на тестовом шаблоне
 - Рекомендация: прогон на PHP 8.x, если есть в OpenServer
+
+---
+
+# РАУНД 2 — ревью после миграции (новые находки)
+
+## Критические (PHP 8: TypeError/ValueError)
+- `rewrite_src_path()`: `sizeof($this->REWRITE_SRC_PATH)` на строке → TypeError 8.0
+  → `if (!empty(...) && is_string(...))`
+- `parse_template()`: `$matches[4][$i]` без isset (тег `{Obj.method}` без скобок) →
+  `parseParamString(NULL)` → TypeError; → `isset(...) ? ... : ''`
+- `parse_template()`: вход `FALSE` (get_template упал) → `preg_match_all(..., FALSE)`
+  → TypeError; → `$template = (string)$template;` в начале
+- `FastWrite()`: `fopen('', 'w')` при вызове без аргументов → ValueError;
+  → guard на пустой `$outputfile`
+- `printarray()`: `count(NULL)` после `clear_define()` (FILELIST unset) → TypeError;
+  → `is_array($arr) && count($arr) != 0`
+- `parseParamString()`: объект в PARSEVARS внутри параметров → `str_replace(..., $obj, ...)`
+  → TypeError; → is_scalar-guard
+- `get_template()`: `rewrite_src_path(FALSE)` при упавшем include + включённом rewrite
+  → TypeError; → проверка `$contents` до rewrite
+
+## Deprecations 8.1+
+- `FastPrint()`/`FastWrite()`: `getfast()` возвращает NULL при ошибке →
+  `str_replace(..., NULL)` / `fwrite($fp, NULL)`; → null-guard
+
+## Undefined index / warnings
+- `parse()`: `$this->FILELIST["$val"]` без isset (хендл не определён)
+- `parse_dynamic()`/`clear_dynamic()`: `$this->DYNAMIC["$Macro"]` без isset
+- `parse_defined()`: `ENDIF` без `IFDEF` → `$depth` < 0 → `$needparsedef[-1]`
+- `get_template()`: `include` несуществующего файла → warning; → `file_exists()`
+
+## Поведенческие (унаследованные)
+- `getfast()`: `stripslashes()` — рудимент magic_quotes, портит `\` в выводе → убрать
+- `pre_filter()`: `PRE_FILTER` заполняется, но нигде не применяется → применить в parse_template
+- `error()`: всегда `echo "ERROR: ... <BR>"` → утечка в вывод/CLI; → флаг/error_log
+- `parse()`: `empty(FALSE)` → повторная попытка загрузки упавшего шаблона на каждый parse
+
+## Безопасность
+- `eval()` с именем метода из шаблона (parse_template, value_defined) → RCE при
+  пользовательских шаблонах; → валидация имени `^[a-zA-Z_][a-zA-Z0-9_]*$` перед eval
+- `include $fname` для `.ft` кэша → выполнение PHP из cache-дира; → `readfile()`
+
+## Оптимизации
+- `parse_template()`: O(vars × template) str_replace → один проход preg_replace_callback
+  (опционально, BC-риск — literal vs regex)
+- Мёртвые переменные: `$ifdefs`/`$needparsedef` в parse_template, `$ifdefs` в parse_defined
+- `cache_file_is_updated()`: двойной `filemtime`
