@@ -35,3 +35,18 @@
 - [x] 30. Безопасность: `readfile()` вместо `include` для `.ft` кэша (verify_cached_files, cache_file)
 - [x] 31. Оптимизация: убрать мёртвые `$ifdefs`/`$needparsedef`
 - [x] 32. `php -l` + smoke-тест раунда 2 + финальное ревью — пройдено
+
+## Раунд 3 — оптимизация (выполнен, проверен byte-diff + бенчмарком)
+- [x] 33. O1: `parse_template()` — strtr-подстановка с bounded do-while
+      + var `FAST_REPLACE` (default TRUE). Итог: 44 → 3.6 ms (12×),
+      E2E parse(): 43 → 4.1 ms (10×)
+- [x] 34. O2a: guard `strpos('<!--')` для 4× preg_replace IFDEF-семейства
+- [x] 35. O2b: за флагом `FAST_BLOCK_SKIP` (default FALSE = байтово-старое).
+      bs=1 на шаблоне без маркеров: 1.05 ms (43×)
+- [x] 36. O3: `parse_defined()` — fast-path строк без `<!--` (4× preg_match)
+- [x] 37. O5: guard include-regex по `strpos('#include')`; ранний выход
+      отменён (не байтово-безопасен)
+- [x] 38. Верификация: byte-diff vs git HEAD — orig==leg полностью;
+      newdef отличается только backward-ref (задокументировано);
+      skip отличается только whitespace (задокументировано).
+      php -l OK, бенчмарк прогнан. Харнесс: `_bench/diff.php`

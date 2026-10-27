@@ -132,3 +132,80 @@
   (опционально, BC-риск — literal vs regex)
 - Мёртвые переменные: `$ifdefs`/`$needparsedef` в parse_template, `$ifdefs` в parse_defined
 - `cache_file_is_updated()`: двойной `filemtime`
+
+---
+
+# РАУНД 3 — анализ производительности (benchmark, PHP 7.4.25)
+
+## Замеры (30 итераций, template ~370KB, 600 переменных)
+- `parse_template()` 600 vars: **44.1 ms/op** — главный хотспот
+- `parse_template()` 20 vars: 6.7 ms/op — почти линейно по числу vars
+- `strtr()` тот же объём за 1 проход: **0.49 ms/op** — НО это стоимость
+  ТОЛЬКО компонента подстановки, не всего parse_template
+- `str_replace()` массивами: 34.9 ms/op — НЕ решение (те же N сканов внутри)
+- IFDEF-heavy (48KB, 600 блоков): 7.7 ms/op, из них `parse_defined()` ~1.5 ms/op
+- `parse()` end-to-end (file + 600 vars): 43.0 ms/op ≈ стоимость parse_template
+- Memory: стабильно ~6 MB peak, утечек нет
+- Честная цель O1 end-to-end: **44 → ~5-7 ms (7-9×)**; с O2b на шаблонах без
+  маркеров: ~2-3 ms (15-20×). «<2 ms» относилось только к компоненту.
+
+## Карта проходов по шаблону за один parse_template()
+1. preg_match_all object-tags — 1 скан (всегда)
+2. preg_match_all include-tags — 1 скан (всегда)
+3. **FOREACH vars: str_replace на КАЖДУЮ переменную — N сканов** ← хотспот
+4. preg_replace чистка незакрытых {VAR} — 1 скан
+5. 4× preg_replace нормализация IFDEF/IFNDEF/ELSE/ENDIF — 4 скана (всегда!)
+6. explode+foreach удаление DYNAMIC-маркеров — 1 скан (всегда!)
+7. parse_defined(): explode+foreach+regex на каждую строку — 1-2 скана (всегда!)
+
+Итого: **N+9 сканов шаблона**, даже если в нём нет ни IFDEF, ни dynamic, ни object-тегов.
+
+## Скрытые трансформации вывода (выяснены при ревизии плана)
+- `parse_defined()` делает `trim()` КАЖДОЙ строки (SPEC:737) — индентация
+  срезается (видно в `<pre>`, `<textarea>`)
+- dynamic-strip (`parse_template`:874-892): explode/rebuild добавляет **+1
+  trailing "\n"** на каждый вызов; `parse_defined()` добавляет ещё +1
+  (gate:736 дропает строки с literal "IFDEF:"/"IFNDEF:"/"ELSE"/"ENDIF" —
+  без `<!--`, case-sensitive)
+- Вывод: любой «пропуск» этих этапов = байтовое изменение вывода.
+
+## Ранжированные оптимизации (в порядке выгоды, исправлено)
+- **O1. Подстановка переменных через strtr() + bounded do-while** — карта
+  строится с ТЕМИ ЖЕ фильтрами (empty-key skip, arrays/objects w-o
+  `__toString` skip, `(string)`-cast, NULL→''); ключи `'{K}'` не пересекаются
+  (брейсы delim), longest-match == sequential здесь. Транзитивная подстановка
+  НЕ опция, а обязательное поведение: assign() допускает значения с
+  placeholders (`assign('TITLE','Hello {NAME}')`), и nested-результаты в
+  PARSEVARS иногда тоже. Одиночный strtr этого не даёт → нужен do-while
+  `while changed` с cap=count(map) (защита от циклов A↔B; остаток циклов
+  всё равно съедает cleanup-regex, финальный вывод тот же).
+  Гейт: если ни одно значение не содержит '{' — ровно 1 проход.
+  Расхождение с текущим кодом: backward-ref (значение поздней var
+  ссылается на раннюю — текущий цикл молча дропает, do-while резолвит).
+  Forward-ref (на позднюю var) текущий код и так резолвит — паритет.
+  Флаг `FAST_REPLACE`: TRUE (default) = strtr-путь, FALSE = старый
+  последовательный цикл — BC-параноикам; держим обе ветки.
+- **O2a. Guard 4× preg_replace по `strpos('<!--')`** — байтово идентично
+  (без `<!--` эти regex не могут ничего изменить). BC-риск: нулевой.
+- **O2b. Skip dynamic-strip + parse_defined при отсутствии `<!--`** —
+  ВНИМАНИЕ: НЕ байтово-идентично! Убирает случайный trim строк и +2
+  trailing "\n" на вызов. По сути багфикс (trim портит pre/textarea,
+  мусорные \n накапливаются при append `.row`), но вывод меняется.
+  Принимать осознанно (changelog + byte-diff в задаче 38) или за флагом.
+- **O3. parse_defined(): fast-path по строкам** — при `strpos($line,'<!--')
+  === false` скипать 4× preg_match (740/748/756/761), но НЕ gate strpos
+  (736) — он держит текущую семантику дропа "ELSE"/"ENDIF"-строк. BC-safe.
+- **O4. parse_dynamic() strpos fast-path** — ВЫПАДАЕТ: там уже substr_count
+  (та же семья), реальной выгоды нет.
+- **O5. Guard include-regex по `strpos('#include')`** — полезно; guard '{'
+  для object-regex почти бесполезен (брейсы в шаблонах почти всегда есть).
+  «Ранний выход, если нет '{' И '<!--'» — НЕ байтово-безопасен (пропускает
+  trim+trailing \n), входит в решение O2b, а не в O5.
+- **O6/O7.** мелочь, по желанию.
+
+## Вне скоупа (зафиксировано)
+- `multiple_assign()`: при активных patterns — foreach по ВСЕМ $GLOBALS на
+  каждый parse() — потенциально квадратично на больших приложениях.
+  Отмечено, не меняем.
+- Кэширование разобранных шаблонов, preg_replace_callback вместо strtr —
+  отклонено (семантика/сложность).
