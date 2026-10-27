@@ -1,0 +1,6 @@
+# Internal work docs — local only, not for the repo
+SPEC.md
+TASKS.md
+
+# Temporary bench/scratch dirs
+_bench/
