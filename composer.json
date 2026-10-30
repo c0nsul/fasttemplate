@@ -1,0 +1,27 @@
+{
+    "name": "c0nsul/fasttemplate",
+    "description": "Fast, file-based template engine for PHP. Classic FastTemplate (PHP3-era, CGI::FastTemplate port) modernized for PHP 7.4-8.4: PHP8-compat fixes, security hardening, strtr-based substitution engine.",
+    "type": "library",
+    "license": "Artistic-1.0",
+    "keywords": [
+        "template",
+        "templating",
+        "template-engine",
+        "fasttemplate",
+        "legacy"
+    ],
+    "authors": [
+        {
+            "name": "FastTemplate contributors",
+            "homepage": "https://github.com/c0nsul/fasttemplate"
+        }
+    ],
+    "require": {
+        "php": ">=7.4"
+    },
+    "autoload": {
+        "classmap": [
+            "class.FastTemplate.php"
+        ]
+    }
+}

@@ -2,5 +2,9 @@
 SPEC.md
 TASKS.md
 
+# Composer
+vendor/
+composer.lock
+
 # Temporary bench/scratch dirs
 _bench/
